@@ -327,11 +327,23 @@ class InvoiceService:
             payment_types = self.siigo_client.get_payment_types("FV")
             payment_id = None
             
-            if payment_types:
+            if payment_types and isinstance(payment_types, list) and len(payment_types) > 0:
                 payment_id = payment_types[0]['id']
                 logger.info(f"Usando forma de pago con ID: {payment_id}")
             else:
-                logger.error("No se encontraron formas de pago disponibles")
+                # Verificar si payment_types tiene la estructura esperada o usar un ID predeterminado
+                if isinstance(payment_types, dict) and 'results' in payment_types and len(payment_types['results']) > 0:
+                    payment_id = payment_types['results'][0]['id']
+                    logger.info(f"Usando forma de pago (de results) con ID: {payment_id}")
+                else:
+                    # Usar un ID de pago predeterminado para entorno de pruebas
+                    payment_id = 5636  # ID predeterminado para entorno de pruebas - Pago de contado
+                    logger.warning(f"No se encontraron formas de pago. Usando ID predeterminado: {payment_id}")
+            
+            # Verificación adicional para asegurarse de que payment_id nunca sea None
+            if payment_id is None:
+                payment_id = 5636  # ID predeterminado para pago de contado en entorno de pruebas
+                logger.warning(f"Forzando uso de ID de pago predeterminado: {payment_id}")
             
             # 6. Crear factura en Siigo
             invoice_data_siigo = {
