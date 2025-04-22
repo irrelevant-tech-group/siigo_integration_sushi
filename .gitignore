@@ -1,0 +1,37 @@
+# Entorno virtual
+venv/
+.env
+*.env
+
+# Archivos de configuración secretos
+creds.json
+
+# Archivos de base de datos locales
+*.db
+*.sqlite3
+
+# Archivos de log
+*.log
+
+# Archivos generados
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Archivos de imágenes de prueba
+*.jpg
+*.jpeg
+*.png
+*.gif
+
+# Archivos del sistema o del editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+
+# Dependencias de Python ya incluidas en requirements.txt
+pip-log.txt
+
+# Entornos interactivos o temporales
+.ipynb_checkpoints/
