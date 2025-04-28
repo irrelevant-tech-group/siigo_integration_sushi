@@ -26,6 +26,10 @@ SIIGO_PARTNER_ID = os.getenv("SIIGO_PARTNER_ID", "IrrelevantProjectsApp")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-3-5-sonnet-20241022")
 
+# Gemini API
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+
 # Database
 DB_PATH = os.getenv("DB_PATH", "siigo_gsheets.db")
 

@@ -4,7 +4,7 @@ Servicio para procesamiento de imágenes.
 import os
 from typing import Dict, List, Any, Optional, Tuple
 
-from apis.claude_api import ClaudeAPIClient
+from apis.gemini_api import GeminiAPIClient
 from config.logging_config import logger
 from utils.image_utils import load_image, check_image_valid
 from utils.text_utils import extract_json_from_response
@@ -13,14 +13,14 @@ from utils.text_utils import extract_json_from_response
 class ImageService:
     """Servicio para procesamiento de imágenes de pedidos"""
     
-    def __init__(self, claude_client: ClaudeAPIClient):
+    def __init__(self, gemini_client: GeminiAPIClient):
         """
         Inicializa el servicio de procesamiento de imágenes.
         
         Args:
-            claude_client: Cliente de Claude API
+            gemini_client: Cliente de Gemini API
         """
-        self.claude_client = claude_client
+        self.gemini_client = gemini_client
     
     def validate_image(self, image_path: str) -> bool:
         """
@@ -64,7 +64,7 @@ class ImageService:
             
         # Detectar cliente
         logger.info("Identificando al cliente en la imagen...")
-        client_name = self.claude_client.detect_client_from_image(image_base64)
+        client_name = self.gemini_client.detect_client_from_image(image_base64)
         
         if client_name:
             logger.info(f"Cliente detectado en la imagen: {client_name}")
@@ -73,7 +73,7 @@ class ImageService:
         
         # Detectar productos
         logger.info("Procesando productos en la imagen...")
-        products = self.claude_client.detect_products_from_image(image_base64)
+        products = self.gemini_client.detect_products_from_image(image_base64)
         
         if not products:
             logger.error("No se pudieron detectar productos en la imagen")
