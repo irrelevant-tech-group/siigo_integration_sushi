@@ -230,6 +230,11 @@ class InvoiceService:
             # 2. Procesar productos para Siigo
             invoice_items = []
             for product in products:
+                # Skip items with zero quantity
+                if float(product.cantidad) <= 0:
+                    logger.warning(f"Saltando producto {product.nombre} con cantidad cero o negativa")
+                    continue
+                    
                 product_code = product.producto_id or f"P{int(time.time())}"
                 
                 siigo_products = self.siigo_client.get_products(code=product_code)

@@ -105,40 +105,36 @@ class CLI:
         
         invoice, products, pdf_path = result
         
-        # Preguntar si guardar en Google Sheets
-        confirm_sheets = input("\n¿Deseas guardar esta factura en el historial de Google Sheets? (s/n): ")
-        if confirm_sheets.lower() == 's':
-            logger.info("Guardando factura en el historial...")
-            saved = self.sheets_client.save_invoice_to_sheet(invoice.to_dict())
-            if saved:
-                print("Factura guardada correctamente en Google Sheets")
-            else:
-                print("Error al guardar la factura en Google Sheets")
+
+        logger.info("Guardando factura en el historial de Google Sheets")
+        saved = self.sheets_client.save_invoice_to_sheet(invoice.to_dict())
+        if saved:
+            print("Factura guardada correctamente en Google Sheets")
+        else:
+            print("Error al guardar la factura en Google Sheets")
         
         # Verificar si se puede generar factura electrónica
         if self.invoice_service.is_siigo_available():
-            confirm_siigo = input("\n¿Deseas generar factura electrónica en Siigo? (s/n): ")
-            if confirm_siigo.lower() == 's':
-                # Preguntar si enviar a la DIAN
-                confirm_dian = input("\n¿Enviar directamente a la DIAN? (s/n): ")
-                send_to_dian = confirm_dian.lower() == 's'
-                
-                # Obtener datos del cliente
-                client_data = self.client_service.get_client_data(invoice.nombre_cliente)
-                
-                if not client_data:
-                    print("Error: No se pudo obtener información del cliente para factura electrónica")
-                    return
-                
-                print(f"Generando factura electrónica en Siigo{' y enviando a DIAN' if send_to_dian else ' (sin enviar a DIAN)'}...")
-                siigo_id = self.invoice_service.generate_siigo_invoice(
-                    invoice, products, client_data, send_to_dian
-                )
-                
-                if siigo_id:
-                    print(f"Factura electrónica generada con éxito en Siigo con ID: {siigo_id}")
-                else:
-                    print("No se pudo generar la factura electrónica en Siigo")
+            # Preguntar si enviar a la DIAN
+            confirm_dian = input("\n¿Enviar directamente a la DIAN? (s/n): ")
+            send_to_dian = confirm_dian.lower() == 's'
+            
+            # Obtener datos del cliente
+            client_data = self.client_service.get_client_data(invoice.nombre_cliente)
+            
+            if not client_data:
+                print("Error: No se pudo obtener información del cliente para factura electrónica")
+                return
+            
+            print(f"Generando factura electrónica en Siigo{' y enviando a DIAN' if send_to_dian else ' (sin enviar a DIAN)'}...")
+            siigo_id = self.invoice_service.generate_siigo_invoice(
+                invoice, products, client_data, send_to_dian
+            )
+            
+            if siigo_id:
+                print(f"Factura electrónica generada con éxito en Siigo con ID: {siigo_id}")
+            else:
+                print("No se pudo generar la factura electrónica en Siigo")
     
     def show_invoice_history(self):
         """Muestra el historial de facturas"""

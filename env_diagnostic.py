@@ -444,6 +444,7 @@ def main():
     # 1. Verificar el archivo .env
     if not check_env_file():
         print("No se puede continuar sin archivo .env")
+        logger.error("echo $SIIGO_ACCESS_KEY")
         return
     
     # 2. Probar diferentes métodos de carga
