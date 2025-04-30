@@ -17,6 +17,7 @@ from reportlab.lib.units import inch
 import requests
 import time
 from google import generativeai as genai
+import anthropic
 
 # Importar la clase SiigoAPI
 try:
@@ -209,30 +210,38 @@ class SiigoGSheetsIntegration:
         if not self.claude_api_key:
             logger.error("No se puede procesar la imagen: API key de Claude no configurada")
             return None
-
+        
+        client = anthropic.Anthropic(api_key=self.claude_api_key)
+        
         try:
-            client = anthropic.Anthropic(api_key=self.claude_api_key)
-            response = client.models.generate_content(
-                model=CLAUDE_MODEL,
-                contents=[
+            message = client.messages.create(
+                model="claude-3-opus-20240229",
+                max_tokens=1000,
+                temperature=0,
+                system=system_prompt,
+                messages=[
                     {
-                        "parts": [
+                        "role": "user",
+                        "content": [
                             {
-                                "text": f"{system_prompt}\n\n{user_prompt}"
-                            },
-                            {
-                                "inline_data": {
-                                    "mime_type": "image/jpeg",
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
                                     "data": image_base64
                                 }
+                            },
+                            {
+                                "type": "text",
+                                "text": user_prompt
                             }
                         ]
                     }
                 ]
             )
-            return response.text
+            return message.content[0].text
         except Exception as e:
-            logger.error(f"Error al procesar con Gemini: {e}")
+            logger.error(f"Error al procesar con Claude: {e}")
             return None
     
     def extract_json_from_response(self, response_text):
