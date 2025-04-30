@@ -870,7 +870,7 @@ class SiigoGSheetsIntegration:
         )
         client_response = self.process_image_with_claude(image_base64, client_system_prompt, client_user_prompt)
         if not client_response:
-            logger.error("No se pudo procesar la imagen para identificar al cliente.")
+            logger.error("No se pudo procesar la imagen para identificar al cliente. ")
             return None
         client_data = self.extract_json_from_response(client_response)
         detected_client_name = client_data.get('cliente', '')
