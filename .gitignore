@@ -19,7 +19,7 @@ __pycache__/
 *.pyo
 
 # Archivos de imágenes de prueba
-*.jpg
+#*.jpg
 *.jpeg
 *.png
 *.gif
