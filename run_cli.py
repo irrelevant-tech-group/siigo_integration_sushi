@@ -16,7 +16,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 import requests
 import time
-from google import generativeai as genai
+from google import genai
+from google.genai import types
 import anthropic
 
 # Importar la clase SiigoAPI
@@ -88,6 +89,7 @@ class SiigoGSheetsIntegration:
         self.claude_api_key = env_vars.get("ANTHROPIC_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
         if not self.claude_api_key:
             logger.warning("No se encontró la API key de Anthropic. La detección de imágenes no funcionará.")
+        
         # Configuración de Gemini API
         self.gemini_api_key = env_vars.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
         if not self.gemini_api_key:
@@ -215,7 +217,7 @@ class SiigoGSheetsIntegration:
         
         try:
             message = client.messages.create(
-                model="claude-3-opus-20240229",
+                model="claude-3-haiku-20240307",
                 max_tokens=1000,
                 temperature=0,
                 system=system_prompt,
@@ -242,6 +244,29 @@ class SiigoGSheetsIntegration:
             return message.content[0].text
         except Exception as e:
             logger.error(f"Error al procesar con Claude: {e}")
+            return None
+    
+    def process_image_with_gemini(self, image_base64, system_prompt, user_prompt):
+        """Procesa la imagen usando Gemini Flash 2.0 con un prompt personalizado"""
+        if not self.gemini_api_key:
+            logger.error("No se puede procesar la imagen: API key de Gemini no configurada")
+            return None
+
+        client = genai.Client(api_key=self.gemini_api_key)
+
+        try:
+            response = client.models.generate_content(
+                model = "gemini-1.5-flash",
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.0,
+                ),
+                contents=[image_base64, user_prompt]
+            )
+            print(f"RESPUESTA GEMINI: {response.text}")
+            return response.text
+        except Exception as e:
+            logger.error(f"Error al procesar con Gemini: {e}")
             return None
     
     def extract_json_from_response(self, response_text):
@@ -886,12 +911,13 @@ class SiigoGSheetsIntegration:
         product_system_prompt = (
             "Eres un asistente especializado en extraer información de imágenes de pedidos. "
             "Analiza la imagen y extrae una lista de productos y sus cantidades. "
-            "Responde únicamente con un JSON en el formato: "
+            "Responde **exclusivamente** con un JSON en el formato: "
             "{'productos': [{'nombre': 'nombre del producto', 'cantidad': número}]}"
         )
         product_user_prompt = (
             "Identifica todos los productos y sus cantidades en esta imagen. "
             "Devuelve solo un objeto JSON con la lista de productos y cantidades."
+            "{'productos': [{'nombre': 'nombre del producto', 'cantidad': número}]}"
         )
         products_response = self.process_image_with_claude(image_base64, product_system_prompt, product_user_prompt)
         if not products_response:

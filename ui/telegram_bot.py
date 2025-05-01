@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config.logging_config import logger
 from config.settings import load_env_file, GCS_BUCKET_NAME
-from apis.gemini_api import GeminiAPIClient
+from apis.claude_api import ClaudeAPIClient
 from apis.google_sheets_api import GoogleSheetsClient
 from apis.siigo_api import SiigoAPIClient
 from database.db_manager import DatabaseManager
@@ -34,7 +34,7 @@ def main():
         
         # Inicializar clientes APIs
         sheets_client = GoogleSheetsClient()
-        gemini_client = GeminiAPIClient()
+        claude_client = ClaudeAPIClient()
         
         # Inicializar Siigo API
         try:
@@ -50,7 +50,7 @@ def main():
         pdf_service = PDFService()
         client_service = ClientService(sheets_client)
         product_service = ProductService(sheets_client)
-        image_service = ImageService(gemini_client)
+        image_service = ImageService(claude_client)
         invoice_service = InvoiceService(
             db_manager,
             sheets_client,

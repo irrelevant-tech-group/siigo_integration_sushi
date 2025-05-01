@@ -5,7 +5,7 @@ import os
 import sqlite3
 from typing import Optional
 
-from apis.gemini_api import GeminiAPIClient
+from apis.claude_api import ClaudeAPIClient
 from apis.google_sheets_api import GoogleSheetsClient
 from apis.siigo_api import SiigoAPIClient
 from config.logging_config import logger
@@ -29,7 +29,7 @@ class CLI:
         
         # Inicializar clientes APIs
         self.sheets_client = GoogleSheetsClient()
-        self.gemini_client = GeminiAPIClient()
+        self.claude_client = ClaudeAPIClient()
         self.siigo_client = None
         
         # Intentar inicializar Siigo API si es posible
@@ -48,7 +48,7 @@ class CLI:
         self.pdf_service = PDFService()
         self.client_service = ClientService(self.sheets_client)
         self.product_service = ProductService(self.sheets_client)
-        self.image_service = ImageService(self.gemini_client)
+        self.image_service = ImageService(self.claude_client)
         self.invoice_service = InvoiceService(
             self.db_manager,
             self.sheets_client,
@@ -69,8 +69,8 @@ class CLI:
         else:
             print("📋 Modo: Facturación PDF solamente")
         
-        if not self.gemini_client.is_available():
-            print("⚠️  Advertencia: API de Gemini no disponible. Procesamiento de imágenes limitado.")
+        if not self.claude_client.is_available():
+            print("⚠️  Advertencia: API de Claude no disponible. Procesamiento de imágenes limitado.")
     
     def display_menu(self):
         """Muestra el menú principal"""
