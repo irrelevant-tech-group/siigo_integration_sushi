@@ -251,8 +251,8 @@ class SiigoAPIClient:
             Lista de tipos de pago o None si hay error
         """
         result = self._make_request("GET", f"payment-types?document_type={document_type}")
-        if result and "results" in result:
-            return result["results"]
+        if result:
+            return result
         return None
     
     def get_users(self) -> Optional[List[Dict[str, Any]]]:

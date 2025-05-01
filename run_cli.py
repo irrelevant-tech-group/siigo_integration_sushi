@@ -718,14 +718,16 @@ class SiigoGSheetsIntegration:
                     except Exception as e:
                         logger.error(f"Error al crear producto en Siigo: {e}")
                         continue
-
-                invoice_items.append({
-                    "code": product_code,
-                    "description": product_name,
-                    "quantity": float(product_info['cantidad']),
-                    "price": float(product_info['precio']),
-                    "discount": 0
-                })
+                
+                # Si el producto no tiene cantidad, no se agrega
+                if product_info['cantidad'] > 0:
+                    invoice_items.append({
+                        "code": product_code,
+                        "description": product_name,
+                        "quantity": float(product_info['cantidad']),
+                        "price": float(product_info['precio']),
+                        "discount": 0
+                    })
 
             # 3. Obtener vendedor/usuario correctamente
             users_data = self.siigo_api.get_users()
