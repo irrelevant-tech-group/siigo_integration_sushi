@@ -350,6 +350,115 @@ class SiigoGSheetsIntegration:
             logger.error(f"Error al obtener datos del cliente: {e}")
             return None
     
+    def get_legal_name_and_branch(self, name=None, branch=None):
+        """Obtiene el nombre legal y la sucursal de un cliente
+        
+        Returns:
+            tuple: (razon_social, sucursal) o (None, None) si hay error o se cancela
+        """
+        try:
+            if not self.gs_client:
+                logger.error("Cliente de Google Sheets no inicializado")
+                return None, None
+            
+            spreadsheet = self.gs_client.open_by_key(SPREADSHEET_ID)
+            worksheet = spreadsheet.worksheet("Razón Social")
+            legal_names = worksheet.get_all_records()
+            
+            # Primero seleccionar la razón social
+            selected_legal_name = None
+
+            if name:    
+                normalized_search = self.normalize_text(name)
+                # Buscar cliente con comparación flexible
+                best_match = None
+                best_score = 0
+
+                for legal_name in legal_names:
+                    normalized_legal_name = self.normalize_text(legal_name['razon_social'])
+                    search_words = set(normalized_search.split())
+                    legal_name_words = set(normalized_legal_name.split())
+                    common_words = search_words.intersection(legal_name_words)
+                    
+                    if len(common_words) > 0:
+                        score = len(common_words) / max(len(search_words), len(legal_name_words))
+                        if score > best_score:
+                            best_score = score
+                            best_match = legal_name
+                
+                if best_match and best_score > 0.6:
+                    logger.info(f"Razón social encontrada: {best_match['razon_social']} (Coincidencia: {best_score:.0%})")
+                    selected_legal_name = best_match
+                
+                # Si hay coincidencia parcial (más del 30%)
+                elif best_match and best_score > 0.3:
+                    logger.info(f"Posible coincidencia: {best_match['razon_social']} (Coincidencia: {best_score:.0%})")
+                    confirm = input(f"¿Confirmar que '{name}' es '{best_match['razon_social']}'? (s/n): ")
+                    if confirm.lower() == 's':
+                        selected_legal_name = best_match
+
+            # Si no se encontró por nombre o no se proporcionó nombre, mostrar lista para seleccionar
+            if not selected_legal_name:
+                unique_legal_names = {}
+                for record in legal_names:
+                    if record['razon_social'] not in unique_legal_names:
+                        unique_legal_names[record['razon_social']] = record
+
+                if unique_legal_names:
+                    print("\nRazones sociales disponibles:")
+                    for i, (razon_social, data) in enumerate(unique_legal_names.items(), 1):
+                        print(f"{i}. {razon_social}")
+                    
+                    while True:
+                        selection = input("\nSelecciona el número de la razón social (o Enter para cancelar): ")
+                        if not selection.strip():
+                            return None, None
+                        if selection.isdigit() and 1 <= int(selection) <= len(unique_legal_names):
+                            selected_legal_name = list(unique_legal_names.values())[int(selection) - 1]
+                            break
+                        print("Selección inválida. Por favor, intenta de nuevo.")
+                else:
+                    logger.warning("No hay razones sociales registradas.")
+                    return None, None
+
+            # Una vez seleccionada la razón social, mostrar sus sucursales
+            available_branches = [record for record in legal_names if record['razon_social'] == selected_legal_name['razon_social']]
+            
+            selected_branch = None
+            
+            # Si se proporcionó un nombre de sucursal, intentar encontrarla
+            if branch:
+                normalized_branch = self.normalize_text(branch)
+                for branch_record in available_branches:
+                    if self.normalize_text(branch_record['sucursal']) == normalized_branch:
+                        selected_branch = branch_record
+                        break
+
+            # Si no se encontró la sucursal o no se proporcionó, mostrar lista para seleccionar
+            if not selected_branch:
+                print(f"\nSucursales disponibles para {selected_legal_name['razon_social']}:")
+                for i, branch_record in enumerate(available_branches, 1):
+                    print(f"{i}. {branch_record['sucursal']}")
+                
+                while True:
+                    selection = input("\nSelecciona el número de la sucursal (o Enter para cancelar): ")
+                    if not selection.strip():
+                        return None, None
+                    if selection.isdigit() and 1 <= int(selection) <= len(available_branches):
+                        selected_branch = available_branches[int(selection) - 1]
+                        break
+                    print("Selección inválida. Por favor, intenta de nuevo.")
+
+            if selected_branch:
+                logger.info(f"Seleccionado: {selected_branch['razon_social']} - {selected_branch['sucursal']}")
+                return selected_branch['razon_social'], selected_branch['sucursal']
+            
+            return None, None
+
+        except Exception as e:
+            logger.error(f"Error al obtener datos de la razón social: {e}")
+            return None, None
+    
     def find_product_price(self, products_data, product_name):
         """Busca el precio de un producto basado en su nombre con comparación flexible"""
         if not product_name:
@@ -391,8 +500,8 @@ class SiigoGSheetsIntegration:
         logger.warning(f"No se encontró ningún producto que coincida con '{product_name}'")
         return None
     
-    def generate_invoice_data(self, products_info, client_data):
-        """Genera los datos de la factura basados en la información de productos y cliente"""
+    def generate_invoice_data(self, products_info, client_data, legal_name, branch):
+        """Genera los datos de la factura basados en la información de productos, cliente, razón social y sucursal"""
         try:
             # Calcular el valor total
             total = sum(p['precio'] * p['cantidad'] for p in products_info)
@@ -449,6 +558,21 @@ class SiigoGSheetsIntegration:
             # Información de la factura
             elements.append(Paragraph(f"Factura #: {invoice_data['factura_id']}", subtitle_style))
             elements.append(Paragraph(f"Fecha: {invoice_data['fecha_emision']}", normal_style))
+            elements.append(Spacer(1, 0.2 * inch))
+            
+            # Información de la razón social y sucursal
+            elements.append(Paragraph("Información de la Empresa", subtitle_style))
+            empresa_data = [
+                ["Razón Social:", invoice_data['razon_social']],
+                ["Sucursal:", invoice_data['sucursal']]
+            ]
+            empresa_table = Table(empresa_data, colWidths=[1.5*inch, 4*inch])
+            empresa_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, -1), colors.lightgrey),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('PADDING', (0, 0), (-1, -1), 6)
+            ]))
+            elements.append(empresa_table)
             elements.append(Spacer(1, 0.2 * inch))
             
             # Información del cliente
@@ -540,7 +664,9 @@ class SiigoGSheetsIntegration:
                 invoice_data['factura_id'],
                 invoice_data.get('pdf_url', ''),
                 invoice_data.get('payload_json', ''),
-                invoice_data['estado']
+                invoice_data['estado'],
+                invoice_data['razon_social'],
+                invoice_data['sucursal']
             ]
             
             # Agregar la factura como nueva fila
@@ -558,11 +684,20 @@ class SiigoGSheetsIntegration:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
+            # Actualizar la estructura de la tabla si es necesario
+            cursor.execute('''
+            ALTER TABLE facturas_locales ADD COLUMN razon_social TEXT DEFAULT NULL;
+            ''')
+            cursor.execute('''
+            ALTER TABLE facturas_locales ADD COLUMN sucursal TEXT DEFAULT NULL;
+            ''')
+            
             # Insertar factura
             cursor.execute('''
             INSERT INTO facturas_locales
-            (id, cliente_nombre, cliente_identificacion, fecha, total, productos, estado, pdf_path, fecha_actualizacion)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, cliente_nombre, cliente_identificacion, fecha, total, productos, estado, pdf_path, 
+             fecha_actualizacion, razon_social, sucursal)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 invoice_data['factura_id'],
                 invoice_data['nombre_cliente'],
@@ -572,7 +707,9 @@ class SiigoGSheetsIntegration:
                 invoice_data['productos_facturados'],
                 invoice_data['estado'],
                 invoice_data.get('pdf_url', ''),
-                datetime.datetime.now().isoformat()
+                datetime.datetime.now().isoformat(),
+                invoice_data['razon_social'],
+                invoice_data['sucursal']
             ))
             
             # Insertar items de factura
@@ -595,6 +732,56 @@ class SiigoGSheetsIntegration:
             conn.close()
             logger.info(f"Factura {invoice_data['factura_id']} guardada en base de datos local")
             return True
+        
+        except sqlite3.OperationalError as e:
+            if "duplicate column name" in str(e).lower():
+                # Si las columnas ya existen, continuar con la inserción
+                conn = sqlite3.connect(self.db_path)
+                cursor = conn.cursor()
+                
+                # Insertar factura sin alterar la tabla
+                cursor.execute('''
+                INSERT INTO facturas_locales
+                (id, cliente_nombre, cliente_identificacion, fecha, total, productos, estado, pdf_path, 
+                 fecha_actualizacion, razon_social, sucursal)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    invoice_data['factura_id'],
+                    invoice_data['nombre_cliente'],
+                    invoice_data['identificacion'],
+                    invoice_data['fecha_emision'],
+                    invoice_data['valor_total'],
+                    invoice_data['productos_facturados'],
+                    invoice_data['estado'],
+                    invoice_data.get('pdf_url', ''),
+                    datetime.datetime.now().isoformat(),
+                    invoice_data['razon_social'],
+                    invoice_data['sucursal']
+                ))
+                
+                # Insertar items de factura
+                for product in products_info:
+                    item_id = f"{invoice_data['factura_id']}-{product['nombre']}-{time.time()}"
+                    cursor.execute('''
+                    INSERT INTO items_factura
+                    (id, factura_id, producto_nombre, cantidad, precio, total)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ''', (
+                        item_id,
+                        invoice_data['factura_id'],
+                        product['nombre'],
+                        product['cantidad'],
+                        product['precio'],
+                        product['precio'] * product['cantidad']
+                    ))
+                
+                conn.commit()
+                conn.close()
+                logger.info(f"Factura {invoice_data['factura_id']} guardada en base de datos local")
+                return True
+            else:
+                logger.error(f"Error al guardar factura en base de datos local: {e}")
+                return False
         
         except Exception as e:
             logger.error(f"Error al guardar factura en base de datos local: {e}")
@@ -644,8 +831,8 @@ class SiigoGSheetsIntegration:
                     "person_type": client_data.get('tipo_persona', 'Person'),
                     "id_type": client_data.get('tipo_identificacion', '13'),
                     "identification": client_data['identificacion'],
-                    "name": [client_data['nombre_cliente']],
-                    "commercial_name": client_data['nombre_cliente'],
+                    "name": [invoice_data['razon_social']],
+                    "commercial_name": invoice_data['nombre_cliente'],  
                     "active": True,
                     "vat_responsible": False,
                     "fiscal_responsibilities": [{"code": "R-99-PN"}],
@@ -663,7 +850,8 @@ class SiigoGSheetsIntegration:
                             "last_name": " ".join(client_data['nombre_cliente'].split()[1:]) if len(client_data['nombre_cliente'].split()) > 1 else "",
                             "email": client_data.get('email', 'cliente@ejemplo.com')
                         }
-                    ]
+                    ],
+                    "comments": invoice_data['sucursal']  # Agregar sucursal como comentarios
                 }
                 try:
                     customer_result = self.siigo_api.create_customer(new_customer)
@@ -912,6 +1100,12 @@ class SiigoGSheetsIntegration:
             logger.error("No se pudo obtener información del cliente para generar la factura.")
             return None
 
+        logger.info("\nSeleccionando razón social y sucursal...")
+        legal_name, branch = self.get_legal_name_and_branch()
+        if not legal_name or not branch:
+            logger.error("No se seleccionó razón social y sucursal.")
+            return None
+
         logger.info("Obteniendo catálogo de productos...")
         products_catalog = self.get_products_data()
         if not products_catalog:
@@ -926,13 +1120,14 @@ class SiigoGSheetsIntegration:
 
             product_details = self.find_product_price(products_catalog, product_name)
             if product_details:
-                detailed_products.append({
-                    "nombre": product_details["nombre_producto"],
-                    "cantidad": product_qty,
-                    "precio": self.clean_price(product_details["precio_unitario"]),
-                    "producto_id": product_details["producto_id"],
-                    "impuesto_id": product_details.get("impuesto_id", "")
-                })
+                if int(product_qty) > 0:
+                    detailed_products.append({
+                        "nombre": product_details["nombre_producto"],
+                        "cantidad": product_qty,
+                        "precio": self.clean_price(product_details["precio_unitario"]),
+                        "producto_id": product_details["producto_id"],
+                        "impuesto_id": product_details.get("impuesto_id", "")
+                    })
             else:
                 logger.warning(f"Advertencia: No se encontró el producto '{product_name}' en el catálogo.")
                 price_input = input(f"Ingresa el precio unitario para '{product_name}' (o presiona Enter para omitir): ")
@@ -950,9 +1145,13 @@ class SiigoGSheetsIntegration:
             return None
 
         logger.info("Generando factura...")
-        invoice = self.generate_invoice_data(detailed_products, client_info)
+        invoice = self.generate_invoice_data(detailed_products, client_info, legal_name, branch)
         if not invoice:
             return None
+
+        # Agregar información de razón social y sucursal al invoice
+        invoice['razon_social'] = legal_name
+        invoice['sucursal'] = branch
 
         self.display_invoice(invoice, detailed_products)
 
@@ -976,6 +1175,7 @@ class SiigoGSheetsIntegration:
             logger.info(
                 f"Generando factura electrónica en Siigo{' y enviando a DIAN' if send_to_dian else ' (sin enviar a DIAN)'}..."
             )
+            # Pasar la información de razón social y sucursal a Siigo
             siigo_id = self.generate_siigo_invoice(invoice, detailed_products, client_info, send_to_dian)
             if siigo_id:
                 logger.info(f"Factura electrónica generada con éxito en Siigo con ID: {siigo_id}")

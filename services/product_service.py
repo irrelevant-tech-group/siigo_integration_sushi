@@ -149,7 +149,8 @@ class ProductService:
                 # Si hay coincidencia parcial, solicitar confirmación
                 if similarity >= 0.4:
                     if self.confirm_product_match(product_name, product_details):
-                        processed_products.append(Product(
+                        if int(product_qty) > 0:
+                            processed_products.append(Product(
                             nombre=product_details["nombre_producto"],
                             cantidad=product_qty,
                             precio=clean_price(product_details["precio_unitario"]),
