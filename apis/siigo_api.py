@@ -25,6 +25,7 @@ class SiigoAPIClient:
             access_key: Clave de acceso de Siigo (opcional, usa la de config si no se proporciona)
             partner_id: ID de partner para las solicitudes a Siigo (opcional)
         """
+        print(f"SIIGO_USERNAME: {SIIGO_USERNAME}")
         self.username = SIIGO_USERNAME or username
         self.access_key = SIIGO_ACCESS_KEY or access_key
         self.partner_id = partner_id or "IrrelevantProjectsApp"  # Valor por defecto

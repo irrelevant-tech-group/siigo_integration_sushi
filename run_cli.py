@@ -245,19 +245,35 @@ class SiigoGSheetsIntegration:
             # Intenta encontrar el JSON en la respuesta
             start_idx = response_text.find('{')
             end_idx = response_text.rfind('}') + 1
-            
+
             if start_idx != -1 and end_idx != -1:
                 json_str = response_text[start_idx:end_idx]
-                data = json.loads(json_str)
-                return data
+                try:
+                    # Primer intento: parsear como JSON estándar
+                    data = json.loads(json_str)
+                    return data
+                except json.JSONDecodeError as e1:
+                    # Segundo intento: reemplazar comillas simples por dobles
+                    json_str_fixed = json_str.replace("'", '"')
+                    try:
+                        data = json.loads(json_str_fixed)
+                        print("[extract_json_from_response] JSON extraído tras reemplazo:", data)
+                        logger.info(f"[extract_json_from_response] JSON extraído tras reemplazo: {data}")
+                        return data
+                    except json.JSONDecodeError as e2:
+                        logger.error(f"Error al decodificar JSON tras reemplazo: {e2}")
+                        print(f"[extract_json_from_response] Error tras reemplazo: {e2}")
+                        logger.debug(f"Texto recibido tras reemplazo: {json_str_fixed}")
+                        return {"error": "Error al decodificar la respuesta incluso tras reemplazo de comillas"}
             else:
-                # Si no encuentra formato JSON, intentamos parsear el texto
                 logger.warning("No se encontró formato JSON en la respuesta")
+                print("[extract_json_from_response] No se encontró formato JSON en la respuesta")
                 return {"error": "Formato de respuesta no reconocido"}
-        except json.JSONDecodeError as e:
-            logger.error(f"Error al decodificar JSON: {e}")
+        except Exception as e:
+            logger.error(f"Error inesperado al decodificar JSON: {e}")
+            print(f"[extract_json_from_response] Error inesperado: {e}")
             logger.debug(f"Texto recibido: {response_text}")
-            return {"error": "Error al decodificar la respuesta"}
+            return {"error": "Error inesperado al decodificar la respuesta"}
     
     def get_products_data(self):
         """Obtiene los datos de productos desde Google Sheets"""
@@ -350,79 +366,27 @@ class SiigoGSheetsIntegration:
             logger.error(f"Error al obtener datos del cliente: {e}")
             return None
     
-    def get_legal_name_and_branch(self, name=None, branch=None):
-        """Obtiene el nombre legal y la sucursal de un cliente
-        
+    def get_branch(self, legal_name, branch=None):
+        """
+        Obtiene la sucursal para una razón social específica.
         Returns:
-            tuple: (razon_social, sucursal) o (None, None) si hay error o se cancela
+            str: La sucursal seleccionada o None si hay error o se cancela
         """
         try:
             if not self.gs_client:
                 logger.error("Cliente de Google Sheets no inicializado")
-                return None, None
+                return None
             
             spreadsheet = self.gs_client.open_by_key(SPREADSHEET_ID)
             worksheet = spreadsheet.worksheet("Razón Social")
             legal_names = worksheet.get_all_records()
             
-            # Primero seleccionar la razón social
-            selected_legal_name = None
-
-            if name:    
-                normalized_search = self.normalize_text(name)
-                # Buscar cliente con comparación flexible
-                best_match = None
-                best_score = 0
-
-                for legal_name in legal_names:
-                    normalized_legal_name = self.normalize_text(legal_name['razon_social'])
-                    search_words = set(normalized_search.split())
-                    legal_name_words = set(normalized_legal_name.split())
-                    common_words = search_words.intersection(legal_name_words)
-                    
-                    if len(common_words) > 0:
-                        score = len(common_words) / max(len(search_words), len(legal_name_words))
-                        if score > best_score:
-                            best_score = score
-                            best_match = legal_name
-                
-                if best_match and best_score > 0.6:
-                    logger.info(f"Razón social encontrada: {best_match['razon_social']} (Coincidencia: {best_score:.0%})")
-                    selected_legal_name = best_match
-                
-                # Si hay coincidencia parcial (más del 30%)
-                elif best_match and best_score > 0.3:
-                    logger.info(f"Posible coincidencia: {best_match['razon_social']} (Coincidencia: {best_score:.0%})")
-                    confirm = input(f"¿Confirmar que '{name}' es '{best_match['razon_social']}'? (s/n): ")
-                    if confirm.lower() == 's':
-                        selected_legal_name = best_match
-
-            # Si no se encontró por nombre o no se proporcionó nombre, mostrar lista para seleccionar
-            if not selected_legal_name:
-                unique_legal_names = {}
-                for record in legal_names:
-                    if record['razon_social'] not in unique_legal_names:
-                        unique_legal_names[record['razon_social']] = record
-
-                if unique_legal_names:
-                    print("\nRazones sociales disponibles:")
-                    for i, (razon_social, data) in enumerate(unique_legal_names.items(), 1):
-                        print(f"{i}. {razon_social}")
-                    
-                    while True:
-                        selection = input("\nSelecciona el número de la razón social (o Enter para cancelar): ")
-                        if not selection.strip():
-                            return None, None
-                        if selection.isdigit() and 1 <= int(selection) <= len(unique_legal_names):
-                            selected_legal_name = list(unique_legal_names.values())[int(selection) - 1]
-                            break
-                        print("Selección inválida. Por favor, intenta de nuevo.")
-                else:
-                    logger.warning("No hay razones sociales registradas.")
-                    return None, None
-
-            # Una vez seleccionada la razón social, mostrar sus sucursales
-            available_branches = [record for record in legal_names if record['razon_social'] == selected_legal_name['razon_social']]
+            # Filtrar sucursales para la razón social seleccionada
+            available_branches = [record for record in legal_names if record['razon_social'] == legal_name]
+            
+            if not available_branches:
+                logger.warning(f"No se encontraron sucursales para la razón social: {legal_name}")
+                return None
             
             selected_branch = None
             
@@ -436,28 +400,28 @@ class SiigoGSheetsIntegration:
 
             # Si no se encontró la sucursal o no se proporcionó, mostrar lista para seleccionar
             if not selected_branch:
-                print(f"\nSucursales disponibles para {selected_legal_name['razon_social']}:")
+                print(f"\nSucursales disponibles para {legal_name}:")
                 for i, branch_record in enumerate(available_branches, 1):
                     print(f"{i}. {branch_record['sucursal']}")
                 
                 while True:
                     selection = input("\nSelecciona el número de la sucursal (o Enter para cancelar): ")
                     if not selection.strip():
-                        return None, None
+                        return None
                     if selection.isdigit() and 1 <= int(selection) <= len(available_branches):
                         selected_branch = available_branches[int(selection) - 1]
                         break
                     print("Selección inválida. Por favor, intenta de nuevo.")
 
             if selected_branch:
-                logger.info(f"Seleccionado: {selected_branch['razon_social']} - {selected_branch['sucursal']}")
-                return selected_branch['razon_social'], selected_branch['sucursal']
+                logger.info(f"Seleccionado: {selected_branch['sucursal']}")
+                return selected_branch['sucursal']
             
-            return None, None
+            return None
 
         except Exception as e:
-            logger.error(f"Error al obtener datos de la razón social: {e}")
-            return None, None
+            logger.error(f"Error al obtener datos de la sucursal: {e}")
+            return None
     
     def find_product_price(self, products_data, product_name):
         """Busca el precio de un producto basado en su nombre con comparación flexible"""
@@ -665,7 +629,6 @@ class SiigoGSheetsIntegration:
                 invoice_data.get('pdf_url', ''),
                 invoice_data.get('payload_json', ''),
                 invoice_data['estado'],
-                invoice_data['razon_social'],
                 invoice_data['sucursal']
             ]
             
@@ -831,7 +794,7 @@ class SiigoGSheetsIntegration:
                     "person_type": client_data.get('tipo_persona', 'Person'),
                     "id_type": client_data.get('tipo_identificacion', '13'),
                     "identification": client_data['identificacion'],
-                    "name": [invoice_data['razon_social']],
+                    "name": invoice_data['nombre_cliente'],
                     "commercial_name": invoice_data['nombre_cliente'],  
                     "active": True,
                     "vat_responsible": False,
@@ -978,7 +941,7 @@ class SiigoGSheetsIntegration:
                 "date": datetime.datetime.now().strftime("%Y-%m-%d"),
                 "customer": {"identification": str(client_data['identificacion']), "branch_office": 0},
                 "seller": seller_id,
-                "observations": f"Factura generada automáticamente. Ref: {invoice_data['factura_id']}",
+                "observations": f"{invoice_data['sucursal']} \nFactura generada automáticamente. Ref: {invoice_data['factura_id']}",
                 "items": invoice_items,
                 "payments": [{
                     "id": payment_id,
@@ -986,7 +949,7 @@ class SiigoGSheetsIntegration:
                     "due_date": datetime.datetime.now().strftime("%Y-%m-%d")
                 }],
                 "stamp": {"send": send_to_dian},
-                "mail": {"send": True}
+                "mail": {"send": True},
             }
 
             if requires_manual_number and invoice_number is not None:
@@ -1100,10 +1063,10 @@ class SiigoGSheetsIntegration:
             logger.error("No se pudo obtener información del cliente para generar la factura.")
             return None
 
-        logger.info("\nSeleccionando razón social y sucursal...")
-        legal_name, branch = self.get_legal_name_and_branch()
-        if not legal_name or not branch:
-            logger.error("No se seleccionó razón social y sucursal.")
+        logger.info("\nSeleccionando sucursal...")
+        branch = self.get_branch(client_info['nombre_cliente'])
+        if not branch:
+            logger.error("No se seleccionó sucursal.")
             return None
 
         logger.info("Obteniendo catálogo de productos...")
@@ -1145,12 +1108,12 @@ class SiigoGSheetsIntegration:
             return None
 
         logger.info("Generando factura...")
-        invoice = self.generate_invoice_data(detailed_products, client_info, legal_name, branch)
+        invoice = self.generate_invoice_data(detailed_products, client_info, detected_client_name, branch)
         if not invoice:
             return None
 
         # Agregar información de razón social y sucursal al invoice
-        invoice['razon_social'] = legal_name
+        invoice['razon_social'] = detected_client_name
         invoice['sucursal'] = branch
 
         self.display_invoice(invoice, detailed_products)
