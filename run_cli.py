@@ -422,6 +422,25 @@ class SiigoGSheetsIntegration:
         except Exception as e:
             logger.error(f"Error al obtener datos de la sucursal: {e}")
             return None
+        
+    def get_tax_percentage(self, product_code):
+        """Obtiene el porcentaje de impuesto basado en el ID de impuesto"""
+        try:
+            print("================================================\n")
+            print(f"INFORMACION TAX ID: {product_code}")
+            print("================================================\n")
+            if not self.siigo_api:
+                logger.error("API de SIIGO no inicializada")
+                return None
+            siigo_products = self.siigo_api.get_products(code=product_code)
+            print("================================================\n")
+            print(f"INFORMACION TAX PERCENTAGE: {siigo_products}")
+            print("================================================\n")
+            tax_percentage= siigo_products['results'][0]['taxes'][0]['percentage']
+            return tax_percentage
+        except Exception as e:
+            logger.error(f"Error al el porcentaje de impuesto: {e}")
+            return None
     
     def find_product_price(self, products_data, product_name):
         """Busca el precio de un producto basado en su nombre con comparación flexible"""
@@ -468,7 +487,7 @@ class SiigoGSheetsIntegration:
         """Genera los datos de la factura basados en la información de productos, cliente, razón social y sucursal"""
         try:
             # Calcular el valor total
-            total = sum(p['precio'] * p['cantidad'] for p in products_info)
+            total = sum(p['precio'] * p['cantidad'] * (1 + p['impuesto_porcentaje'] / 100)for p in products_info)
             
             # Formatear la lista de productos
             products_list = "\n".join([f"{p['nombre']} x {p['cantidad']} = ${p['precio'] * p['cantidad']:.2f}" for p in products_info])
@@ -831,50 +850,35 @@ class SiigoGSheetsIntegration:
                 product_name = product_info['nombre']
 
                 siigo_products = self.siigo_api.get_products(code=product_code)
+
+                #logger.info(f"INFORMACION PRODUCTOOO: {siigo_products}")
                 product_id = None
 
                 if siigo_products and 'results' in siigo_products and len(siigo_products['results']) > 0:
                     product_id = siigo_products['results'][0]['id']
                     logger.info(f"Producto encontrado en Siigo: {product_name} (ID: {product_id})")
-                else:
-                    logger.info(f"Producto no encontrado en Siigo, creando nuevo producto: {product_name}")
-                    new_product = {
-                        "code": product_code,
-                        "name": product_name,
-                        "account_group": 1253,
-                        "type": "Product",
-                        "stock_control": True,
-                        "active": True,
-                        "tax_classification": "Taxed",
-                        "taxes": [{"id": product_info.get('impuesto_id', 13156)}],
-                        "prices": [{
-                            "currency_code": "COP",
-                            "price_list": [
-                                {
-                                    "position": 1,
-                                    "value": float(product_info['precio'])
-                                }
-                            ]
-                        }]
-                    }
-                    try:
-                        product_result = self.siigo_api.create_product(new_product)
-                        product_id = product_result['id']
-                        logger.info(f"Producto creado en Siigo: {product_name} (ID: {product_id})")
-                    except Exception as e:
-                        logger.error(f"Error al crear producto en Siigo: {e}")
-                        continue
                 
-                # Si el producto no tiene cantidad, no se agrega
-                if product_info['cantidad'] > 0:
-                    invoice_items.append({
-                        "code": product_code,
-                        "description": product_name,
-                        "quantity": float(product_info['cantidad']),
-                        "price": float(product_info['precio']),
-                        "discount": 0
-                    })
+                # Agregar el impuesto al item de la factura si la cantidad es mayor a 0
+                
+                taxes = []
+                impuesto_id = product_info['impuesto_id']
+                impuesto_id_int = int(impuesto_id)
+                taxes.append({"id": impuesto_id_int})
+                tax_percentage= siigo_products['results'][0]['taxes'][0]['percentage']
+                #logger.info(f"INFORMACION TAXESSSS: {taxes}")
 
+                print(f"Producto '{product_name}': tiene impuesto_id {impuesto_id_int}")
+                logger.info(f"Producto '{product_name}': tiene impuesto_id {impuesto_id_int}")
+                invoice_items.append({
+                    "code": product_code,
+                    "description": product_name,
+                    "quantity": float(product_info['cantidad']),
+                    #"price": float(product_info['precio']),
+                    "discount": 0,
+                    "taxes": taxes,
+                    "taxed_price": float(product_info['precio']) * (1 + float(tax_percentage) / 100)
+                })
+            logger.info(f"INFORMACION ITEMS: {invoice_items}")
             # 3. Obtener vendedor/usuario correctamente
             users_data = self.siigo_api.get_users()
             if isinstance(users_data, dict) and 'results' in users_data:
@@ -936,6 +940,10 @@ class SiigoGSheetsIntegration:
                 payment_id = None
 
             # 6. Crear la estructura base del documento
+            total_invoice = round(invoice_data['valor_total'])
+            #total_invoice = 320110
+            print(f"[SIIGO] Total factura: {invoice_data['valor_total']} | Total enviado en payments: {total_invoice}")
+            logger.info(f"[SIIGO] Total factura: {invoice_data['valor_total']} | Total enviado en payments: {total_invoice}")
             invoice_data_siigo = {
                 "document": {"id": document_id},
                 "date": datetime.datetime.now().strftime("%Y-%m-%d"),
@@ -945,7 +953,7 @@ class SiigoGSheetsIntegration:
                 "items": invoice_items,
                 "payments": [{
                     "id": payment_id,
-                    "value": invoice_data['valor_total'],
+                    "value": total_invoice,
                     "due_date": datetime.datetime.now().strftime("%Y-%m-%d")
                 }],
                 "stamp": {"send": send_to_dian},
@@ -1082,6 +1090,9 @@ class SiigoGSheetsIntegration:
             product_qty = product["cantidad"]
 
             product_details = self.find_product_price(products_catalog, product_name)
+
+            tax_percentage = self.get_tax_percentage(product_details["producto_id"])
+            logger.info(f"INFORMACION TAX PERCENTAGE: {tax_percentage}")
             if product_details:
                 if int(product_qty) > 0:
                     detailed_products.append({
@@ -1089,7 +1100,8 @@ class SiigoGSheetsIntegration:
                         "cantidad": product_qty,
                         "precio": self.clean_price(product_details["precio_unitario"]),
                         "producto_id": product_details["producto_id"],
-                        "impuesto_id": product_details.get("impuesto_id", "")
+                        "impuesto_id": product_details["impuesto_id"],
+                        "impuesto_porcentaje": tax_percentage
                     })
             else:
                 logger.warning(f"Advertencia: No se encontró el producto '{product_name}' en el catálogo.")
@@ -1117,15 +1129,6 @@ class SiigoGSheetsIntegration:
         invoice['sucursal'] = branch
 
         self.display_invoice(invoice, detailed_products)
-
-        logger.info("\nGenerando PDF de la factura...")
-        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-        pdf_filename = f"factura_{invoice['factura_id']}_{timestamp}.pdf"
-        pdf_path = self.generate_invoice_pdf(invoice, detailed_products, pdf_filename)
-
-        if pdf_path:
-            invoice['pdf_url'] = pdf_path
-            logger.info(f"PDF generado exitosamente: {pdf_path}")
 
         self.save_invoice_to_db(invoice, detailed_products)
         logger.info("Guardando factura en el historial de Google Sheets")
