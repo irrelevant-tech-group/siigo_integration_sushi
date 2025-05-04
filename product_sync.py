@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 import sqlite3
 import pandas as pd
-from siigo_api import SiigoAPI
+from siigo_api import SiigoAPIClient
 
 # Configurar logging
 logging.basicConfig(
@@ -24,7 +24,7 @@ class ProductSynchronizer:
     def __init__(self, db_path="local_database.db"):
         """Inicializa el sincronizador con la base de datos local y la API de Siigo"""
         self.db_path = db_path
-        self.siigo_api = SiigoAPI()
+        self.siigo_api = SiigoAPIClient()
         self.setup_database()
         # Cargar datos de catálogo necesarios para la transformación
         self._load_catalog_data()
