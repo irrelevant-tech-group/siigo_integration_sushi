@@ -165,23 +165,25 @@ class SiigoAPIClient:
             logger.error(f"Error en solicitud {method} a {endpoint}: {str(e)}")
             return None
     
-    def get_customers(self, identification: Optional[str] = None, name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_customers(self, identification: Optional[str] = None, name: Optional[str] = None, page: int = 1, page_size: int = 100) -> Optional[Dict[str, Any]]:
         """
         Obtiene clientes de Siigo.
         
         Args:
             identification: Número de identificación del cliente (opcional)
             name: Nombre del cliente (opcional)
-            
+            page: Número de página para paginación (opcional, default 1)
+            page_size: Tamaño de página para paginación (opcional, default 100)
+        
         Returns:
             Datos de los clientes o None si hay error
         """
-        params = {}
+        params = {"page": page, "page_size": page_size}
         if identification:
             params["identification"] = identification
         if name:
             params["name"] = name
-            
+        
         return self._make_request("GET", "customers", params=params)
     
     def create_customer(self, customer_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:

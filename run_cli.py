@@ -17,6 +17,8 @@ from reportlab.lib.units import inch
 import requests
 import time
 import anthropic
+import pandas as pd
+import csv
 
 # Importar la clase SiigoAPI
 try:
@@ -299,7 +301,7 @@ class SiigoGSheetsIntegration:
             spreadsheet = self.gs_client.open_by_key(SPREADSHEET_ID)
             worksheet = spreadsheet.worksheet("Clientes")
             clients = worksheet.get_all_records()
-            
+            logger.info(f"CLIENTES: {clients}")
             if client_name:
                 # Normalizar el nombre buscado
                 normalized_search = self.normalize_text(client_name)
@@ -1072,7 +1074,8 @@ class SiigoGSheetsIntegration:
             return None
 
         logger.info("\nSeleccionando sucursal...")
-        branch = self.get_branch(client_info['nombre_cliente'])
+        #branch = self.get_branch(client_info['nombre_cliente']) # Override por el nombre del cliente (dado que se usa asi en sushimarket)
+        branch =client_info['nombre_cliente']
         if not branch:
             logger.error("No se seleccionó sucursal.")
             return None
@@ -1155,6 +1158,88 @@ class SiigoGSheetsIntegration:
         logger.info("\nProceso de facturación completado.")
         return invoice
 
+    def sync_customers_from_siigo(self):
+        """Sincroniza clientes desde Siigo a Google Sheets usando pandas y CSV"""
+        try:
+            if not self.siigo_api:
+                logger.error("No se puede sincronizar: API de Siigo no inicializada")
+                return False
+            
+            if not self.gs_client:
+                logger.error("No se puede sincronizar: Cliente de Google Sheets no inicializado")
+                return False
+            
+            # Obtener todos los clientes de Siigo usando paginación
+            clientes_list = []
+            page = 1
+            page_size = 100
+            #while True:
+            while page <= 10:
+                customers_response = self.siigo_api.get_customers(page=page, page_size=page_size)
+                if not customers_response or 'results' not in customers_response:
+                    break
+
+                results = customers_response['results']
+                if not results:
+                    break
+
+                for customer in results:
+                    name_parts = [part for part in customer.get('name', []) if part is not None]
+                    name = " ".join(map(str, name_parts))
+
+                    email = ""
+                    phone = ""
+                    if customer.get('contacts'):
+                        for contact in customer['contacts']:
+                            if contact.get('email'):
+                                email = contact['email']
+                            if contact.get('phones'):
+                                phone = contact['number']
+                    address = ""
+                    city = ""
+                    if customer.get('address'):
+                        address = customer.get('address', {}).get('address', '')
+                        city_data = customer.get('address', {}).get('city', {})
+                        city = city_data.get('city_name', '')
+                    clientes_list.append({
+                        'cliente_id': customer.get('id', ''),
+                        'nombre_cliente': name,
+                        'identificacion': customer.get('identification', ''),
+                        'email': email,
+                        'telefono': phone,
+                        'direccion': address,
+                        'ciudad': city,
+                        'observaciones': customer.get('comments', '')
+                    })
+
+                # Si la cantidad de resultados es menor al page_size, ya no hay más páginas
+                if len(results) < page_size:
+                    break
+
+                page += 1
+            
+            # Crear DataFrame y guardar a CSV
+            df = pd.DataFrame(clientes_list)
+            df = df.fillna('')  # Reemplaza todos los None/NaN por cadenas vacías
+            csv_path = 'clientes_siigo.csv'
+            df.to_csv(csv_path, index=False)
+            
+            # Subir el CSV a Google Sheets
+            spreadsheet = self.gs_client.open_by_key(SPREADSHEET_ID)
+            worksheet = spreadsheet.worksheet("Clientes")
+            worksheet.clear()
+            with open(csv_path, 'r', encoding='utf-8') as file_obj:
+                reader = csv.reader(file_obj)
+                data = list(reader)
+                worksheet.update(data,'A1')
+            
+            logger.info(f"Sincronización completada: {len(clientes_list)} clientes actualizados (vía CSV)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error al sincronizar clientes: {e}")
+            return False
+
 
 def main():
     """Función principal para ejecutar el proceso de facturación"""
@@ -1175,6 +1260,7 @@ def main():
         print("2. Ver historial de facturas")
         print("3. Verificar conexión con Siigo")
         print("4. Verificar conexión con Google Sheets")
+        print("5. Sincronizar clientes desde Siigo")
         print("0. Salir")
 
         option = input("\nSelecciona una opción: ")
@@ -1238,6 +1324,12 @@ def main():
                     print(f"❌ Error al conectar con Google Sheets: {e}")
             else:
                 print("❌ Cliente de Google Sheets no inicializado. Verifique el archivo de credenciales.")
+        elif option == "5":
+            print("\nSincronizando clientes desde Siigo...")
+            if integration.sync_customers_from_siigo():
+                print("✅ Sincronización completada con éxito")
+            else:
+                print("❌ Error al sincronizar clientes")
         else:
             print("Opción no válida")
 

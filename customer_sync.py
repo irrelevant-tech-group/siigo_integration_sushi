@@ -29,174 +29,6 @@ class CustomerSynchronizer:
         # Cargar datos de catálogo necesarios para la transformación
         self._load_catalog_data()
     
-    def setup_database(self):
-        """Configura la base de datos local si no existe"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Crear tabla para clientes locales
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customers (
-            id TEXT PRIMARY KEY,
-            identification TEXT,
-            branch_office INTEGER DEFAULT 0,
-            name TEXT,
-            person_type TEXT,
-            id_type TEXT,
-            email TEXT,
-            phone TEXT,
-            address TEXT,
-            city TEXT,
-            state TEXT,
-            country TEXT,
-            postal_code TEXT,
-            last_updated TEXT,
-            siigo_id TEXT,
-            siigo_synced INTEGER DEFAULT 0,
-            siigo_last_sync TEXT,
-            raw_data TEXT
-        )
-        ''')
-        
-        # Crear tabla para clientes de Siigo
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS siigo_customers (
-            id TEXT PRIMARY KEY,
-            identification TEXT,
-            branch_office INTEGER DEFAULT 0,
-            name TEXT,
-            commercial_name TEXT,
-            person_type TEXT,
-            id_type TEXT,
-            vat_responsible INTEGER,
-            fiscal_responsibilities TEXT,
-            address TEXT,
-            city TEXT,
-            state TEXT,
-            country TEXT,
-            postal_code TEXT,
-            last_updated TEXT,
-            local_synced INTEGER DEFAULT 0,
-            local_id TEXT,
-            raw_data TEXT,
-            UNIQUE(identification, branch_office)
-        )
-        ''')
-        
-        # Crear tabla para registro de sincronización
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customer_sync_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            sync_type TEXT,
-            start_time TEXT,
-            end_time TEXT,
-            customers_created INTEGER,
-            customers_updated INTEGER,
-            customers_failed INTEGER,
-            details TEXT
-        )
-        ''')
-        
-        # Crear tabla para almacenar datos de catálogo
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS customer_catalog_data (
-            catalog_type TEXT,
-            catalog_id TEXT,
-            name TEXT,
-            additional_data TEXT,
-            PRIMARY KEY (catalog_type, catalog_id)
-        )
-        ''')
-        
-        conn.commit()
-        conn.close()
-    
-    def _load_catalog_data(self):
-        """Carga datos de catálogo desde Siigo para usarlos en transformaciones"""
-        try:
-            # Obtener tipos de documento de identidad
-            # Nota: Siigo no tiene un endpoint específico para esto, así que deberíamos
-            # crear una tabla de referencia con los tipos de documento
-            
-            # Por ahora, crearemos una lista estática
-            id_types = [
-                {"code": "13", "name": "Cédula de ciudadanía"},
-                {"code": "31", "name": "NIT"},
-                {"code": "22", "name": "Cédula de extranjería"},
-                {"code": "42", "name": "Documento de identificación extranjero"},
-                {"code": "50", "name": "NIT de otro país"},
-                {"code": "91", "name": "NUIP"},
-                {"code": "41", "name": "Pasaporte"},
-                {"code": "11", "name": "Registro civil"}
-            ]
-            
-            self._save_catalog_data("id_type", id_types)
-            
-            # También podríamos precargar una lista de ciudades si tenemos acceso a ella
-            
-            logger.info("Datos de catálogo de clientes cargados correctamente")
-        except Exception as e:
-            logger.error(f"Error al cargar datos de catálogo de clientes: {str(e)}")
-    
-    def _save_catalog_data(self, catalog_type, items):
-        """Guarda datos de catálogo en la base de datos local"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        for item in items:
-            item_id = str(item.get('code'))
-            name = item.get('name', '')
-            additional_data = json.dumps(item)
-            
-            cursor.execute('''
-            INSERT OR REPLACE INTO customer_catalog_data (catalog_type, catalog_id, name, additional_data)
-            VALUES (?, ?, ?, ?)
-            ''', (catalog_type, item_id, name, additional_data))
-        
-        conn.commit()
-        conn.close()
-    
-    def _get_catalog_item(self, catalog_type, item_id=None, name=None):
-        """Obtiene un item de catálogo por id o nombre"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        if item_id:
-            cursor.execute('''
-            SELECT catalog_id, name, additional_data FROM customer_catalog_data
-            WHERE catalog_type = ? AND catalog_id = ?
-            ''', (catalog_type, str(item_id)))
-        elif name:
-            cursor.execute('''
-            SELECT catalog_id, name, additional_data FROM customer_catalog_data
-            WHERE catalog_type = ? AND name LIKE ?
-            ''', (catalog_type, f"%{name}%"))
-        else:
-            cursor.execute('''
-            SELECT catalog_id, name, additional_data FROM customer_catalog_data
-            WHERE catalog_type = ?
-            ''', (catalog_type,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        if not results:
-            return None
-        
-        if item_id or name:
-            # Devolver solo el primer resultado como diccionario
-            item_id, name, additional_data = results[0]
-            return {
-                'id': item_id,
-                'name': name,
-                'data': json.loads(additional_data)
-            }
-        else:
-            # Devolver todos los resultados como lista de diccionarios
-            return [
-                {'id': r[0], 'name': r[1], 'data': json.loads(r[2])}
-                for r in results
-            ]
     
     def sync_from_siigo(self, full_sync=False):
         """
@@ -239,32 +71,58 @@ class CustomerSynchronizer:
             if last_sync_date:
                 params['updated_start'] = last_sync_date
             
-            # Obtener clientes paginados
+            # Configuración de paginación
             page = 1
             page_size = 100
-            total_pages = 1  # Se actualizará con la primera respuesta
-            
-            while page <= total_pages:
-                logger.info(f"Obteniendo clientes de Siigo - Página {page} de {total_pages}")
+            has_more_pages = True
+            total_processed = 0
+
+            while has_more_pages:
+                logger.info(f"Obteniendo página {page} de clientes de Siigo (procesados hasta ahora: {total_processed})")
                 
-                # Obtener página de clientes
-                customers_response = self.siigo_api.get_customers(page=page, page_size=page_size, **params)
-                
-                # Actualizar total de páginas si es la primera página
-                if page == 1 and 'pagination' in customers_response:
-                    total_results = customers_response['pagination']['total_results']
-                    total_pages = (total_results + page_size - 1) // page_size
-                    logger.info(f"Total de clientes a sincronizar: {total_results}")
-                
-                # Procesar clientes de esta página
-                if 'results' in customers_response:
-                    self._process_siigo_customers(customers_response['results'], sync_log)
-                
-                # Pasar a la siguiente página
-                page += 1
-                
-                # Pequeña pausa para no sobrecargar la API
-                time.sleep(0.5)
+                try:
+                    # Obtener página de clientes
+                    customers_response = self.siigo_api.get_customers(page=page, page_size=page_size, **params)
+                    
+                    # Verificar si hay resultados
+                    if not customers_response or 'results' not in customers_response:
+                        logger.warning(f"No se encontraron resultados en la página {page}")
+                        break
+                    
+                    current_page_results = customers_response.get('results', [])
+                    if not current_page_results:
+                        logger.info("No hay más clientes para procesar")
+                        break
+                    
+                    # Procesar clientes de esta página
+                    self._process_siigo_customers(current_page_results, sync_log)
+                    
+                    # Actualizar contadores y verificar si hay más páginas
+                    total_processed += len(current_page_results)
+                    
+                    # Verificar si hay más páginas según la paginación
+                    pagination = customers_response.get('pagination', {})
+                    total_pages = pagination.get('total_pages', 0)
+                    total_results = pagination.get('total_results', 0)
+                    
+                    logger.info(f"Progreso: {total_processed}/{total_results} clientes procesados")
+                    
+                    if page >= total_pages or total_processed >= total_results:
+                        has_more_pages = False
+                        logger.info("Se alcanzó el final de los resultados")
+                    else:
+                        page += 1
+                    
+                    # Pequeña pausa para no sobrecargar la API
+                    time.sleep(0.5)
+                    
+                except Exception as e:
+                    error_msg = f"Error procesando página {page}: {str(e)}"
+                    logger.error(error_msg)
+                    sync_log['details'].append(error_msg)
+                    # Intentar continuar con la siguiente página
+                    page += 1
+                    continue
             
             logger.info(f"Sincronización desde Siigo completada: {sync_log['customers_created']} creados, "
                        f"{sync_log['customers_updated']} actualizados, {sync_log['customers_failed']} fallidos")
