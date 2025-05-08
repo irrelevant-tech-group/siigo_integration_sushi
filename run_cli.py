@@ -19,6 +19,7 @@ import time
 import anthropic
 import pandas as pd
 import csv
+from product_sync import ProductSynchronizer
 
 # Importar la clase SiigoAPI
 try:
@@ -158,7 +159,7 @@ class SiigoGSheetsIntegration:
             return ""
         
         # Convertir a minúsculas
-        text = text.lower()
+        text = str(text).lower()
         
         # Reemplazar caracteres con tilde por sus equivalentes sin tilde
         replacements = {
@@ -1094,7 +1095,7 @@ class SiigoGSheetsIntegration:
 
             product_details = self.find_product_price(products_catalog, product_name)
 
-            tax_percentage = self.get_tax_percentage(product_details["producto_id"])
+            tax_percentage = self.get_tax_percentage(product_details["codigo"])
             logger.info(f"INFORMACION TAX PERCENTAGE: {tax_percentage}")
             if product_details:
                 if int(product_qty) > 0:
@@ -1240,6 +1241,47 @@ class SiigoGSheetsIntegration:
             logger.error(f"Error al sincronizar clientes: {e}")
             return False
 
+    def sync_products_from_siigo(self):
+        """Sincroniza productos desde Siigo a Google Sheets usando pandas y CSV"""
+        try:
+            if not self.siigo_api:
+                logger.error("No se puede sincronizar: API de Siigo no inicializada")
+                return False
+            
+            if not self.gs_client:
+                logger.error("No se puede sincronizar: Cliente de Google Sheets no inicializado")
+                return False
+            
+            # Usar el ProductSynchronizer para obtener los productos
+            product_sync = ProductSynchronizer()
+            productos_list = product_sync.sync_from_siigo(full_sync=True)
+            
+            if not productos_list:
+                logger.error("Error al sincronizar productos desde Siigo")
+                return False
+            
+            # Crear DataFrame y guardar a CSV
+            df = pd.DataFrame(productos_list)
+            df = df.fillna('')  # Reemplaza todos los None/NaN por cadenas vacías
+            csv_path = 'productos_siigo.csv'
+            df.to_csv(csv_path, index=False)
+            
+            # Subir el CSV a Google Sheets
+            spreadsheet = self.gs_client.open_by_key(SPREADSHEET_ID)
+            worksheet = spreadsheet.worksheet("Productos")
+            worksheet.clear()
+            with open(csv_path, 'r', encoding='utf-8') as file_obj:
+                reader = csv.reader(file_obj)
+                data = list(reader)
+                worksheet.update(data,'A1')
+            
+            logger.info(f"Sincronización completada: {len(productos_list)} productos actualizados (vía CSV)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error al sincronizar productos: {e}")
+            return False
+
 
 def main():
     """Función principal para ejecutar el proceso de facturación"""
@@ -1261,6 +1303,7 @@ def main():
         print("3. Verificar conexión con Siigo")
         print("4. Verificar conexión con Google Sheets")
         print("5. Sincronizar clientes desde Siigo")
+        print("6. Sincronizar productos desde Siigo")
         print("0. Salir")
 
         option = input("\nSelecciona una opción: ")
@@ -1330,6 +1373,12 @@ def main():
                 print("✅ Sincronización completada con éxito")
             else:
                 print("❌ Error al sincronizar clientes")
+        elif option == "6":
+            print("\nSincronizando productos desde Siigo...")
+            if integration.sync_products_from_siigo():
+                print("✅ Sincronización completada con éxito")
+            else:
+                print("❌ Error al sincronizar productos")
         else:
             print("Opción no válida")
 

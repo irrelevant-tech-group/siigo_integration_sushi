@@ -198,7 +198,7 @@ class SiigoAPIClient:
         """
         return self._make_request("POST", "customers", data=customer_data)
     
-    def get_products(self, code: Optional[str] = None, name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    def get_products(self, code: Optional[str] = None, name: Optional[str] = None, page: int = 1, page_size: int = 100) -> Optional[Dict[str, Any]]:
         """
         Obtiene productos de Siigo.
         
@@ -209,7 +209,7 @@ class SiigoAPIClient:
         Returns:
             Datos de los productos o None si hay error
         """
-        params = {}
+        params = {"page": page, "page_size": page_size}
         if code:
             params["code"] = code
         if name:
@@ -266,6 +266,30 @@ class SiigoAPIClient:
             Lista de usuarios o None si hay error
         """
         result = self._make_request("GET", "users")
+        if result and "results" in result:
+            return result["results"]
+        return result  # En caso de que la estructura de respuesta cambie
+    
+    def get_account_groups(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Obtiene los grupos de inventario de Siigo.
+        
+        Returns:
+            Lista de grupos de inventario o None si hay error
+        """
+        result = self._make_request("GET", "account-groups")
+        if result and "results" in result:
+            return result["results"]
+        return result  # En caso de que la estructura de respuesta cambie
+    
+    def get_taxes(self) -> Optional[List[Dict[str, Any]]]:
+        """
+        Obtiene los impuestos configurados en Siigo.
+        
+        Returns:
+            Lista de impuestos o None si hay error
+        """
+        result = self._make_request("GET", "taxes")
         if result and "results" in result:
             return result["results"]
         return result  # En caso de que la estructura de respuesta cambie
